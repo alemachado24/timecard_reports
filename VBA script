@@ -1,0 +1,1619 @@
+Sub Timecard_Reports()
+'
+
+Dim StartTime As Double
+Dim SecondsElapsed As Double
+
+'Remember time when macro starts
+    StartTime = Timer
+
+'Renombrar la tab "Sheet1" -----> IMPORTANTE
+'Dejar 2 Columnas de espacio y pegar la tabla en la tercera columna - IDS AND MAIN LOCATION
+'VLOOKUP WILL WORK ONLY WITH LESS THAN 1000 EMPLOYEES
+      
+'Range Sorted "IDS"
+    Range("O2").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.Worksheets("Sheet1").Sort.SortFields.Add2 Key:=Range(Range("O2"), Range("O2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("Sheet1").Sort
+        .SetRange Range("O2").CurrentRegion
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+'Fixing from Raw Data (Tanda)
+    Columns("A:A").Select
+    Selection.Insert Shift:=xlToRight, CopyOrigin:=xlFormatFromLeftOrAbove
+    Range("A1").Select
+    ActiveCell.FormulaR1C1 = "Main Location"
+    Columns("B:B").Select
+    Selection.Insert Shift:=xlToRight, CopyOrigin:=xlFormatFromLeftOrAbove
+    Columns("F:F").Select
+    Selection.Cut
+    Columns("B:B").Select
+    ActiveSheet.Paste
+    Range("B1").Select
+    ActiveCell.FormulaR1C1 = "Tanda Location"
+    Columns("F:F").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("F:G").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("H:I").Select
+    Selection.Delete Shift:=xlToLeft
+    Columns("F:F").Select
+    Selection.Insert Shift:=xlToRight, CopyOrigin:=xlFormatFromLeftOrAbove
+    Columns("J:J").Select
+    Selection.Cut
+    Columns("F:F").Select
+    ActiveSheet.Paste
+    Range("G2:H2").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Selection.NumberFormat = "[$-en-US]h:mm AM/PM;@"
+    
+'Vlookup now for Main Location
+    Range("a2").Select
+    ActiveCell.FormulaR1C1 = "=vlookup(RC[2],r2c13:r1500c14,2,false)"
+    Range("a2").Select
+
+'Autofil para un rango de filas variables ----> NOTA
+    Selection.AutoFill Destination:=Range("a2:A" & Range("B" & Rows.Count).End(xlUp).Row)
+    Range(Selection, Selection.End(xlDown)).Select
+    Columns("a").Copy
+    Columns("a").PasteSpecial Paste:=xlPasteValues
+
+'Reemplazar #N/A de los WINIDs que no se encontraron y reemplazalos con "pending"
+    Cells.Replace What:="#N/A", Replacement:="pending", LookAt:=xlPart, _
+        SearchOrder:=xlByRows, MatchCase:=False, SearchFormat:=False, _
+        ReplaceFormat:=False
+        
+'Filtrar por valor de "pending"
+
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:= _
+        "pending"
+    Range("A1").Select
+    
+'Substituir "pending" por el valor de la columna de al lado (donde el empleado hizo clock-in fisicamente)
+        
+Dim cell As Range
+    For i = 2 To Rows.Count
+    Sheets("Sheet1").Select
+    If Cells(i, 1).Value = "pending" Then
+    Cells(i, 2).Select
+    Selection.Copy
+    Cells(i, 1).Select
+    Selection.PasteSpecial Paste:=xlPasteValues
+    End If
+    Next i
+
+'Borrar el filtro ("pending") de la tabla para poder borrar los WINIDs para el VLOOKUP inicial
+
+If ActiveSheet.FilterMode Then Cells.AutoFilter
+
+'Borrar los WINIDS de la derecha
+    Range("M1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Delete
+
+
+'Fixing Sheet1 first:
+
+'Flags & Headers
+    Range("J1").Select
+    Application.CutCopyMode = False
+    ActiveCell.FormulaR1C1 = "Flags"
+    Range(Selection, Selection.End(xlToLeft)).Select
+    With Selection
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlBottom
+        .WrapText = False
+        .Orientation = 0
+        .AddIndent = False
+        .IndentLevel = 0
+        .ShrinkToFit = False
+        .ReadingOrder = xlContext
+        .MergeCells = False
+    End With
+    Selection.Font.Bold = True
+    
+    Range("A1").Select
+    Range(Selection, Selection.CurrentRegion).Select
+    With Selection
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlBottom
+        .WrapText = False
+        .Orientation = 0
+        .AddIndent = False
+        .IndentLevel = 0
+        .ShrinkToFit = False
+        .ReadingOrder = xlContext
+        .MergeCells = False
+    End With
+    Worksheets("Sheet1").Columns("A:J").AutoFit
+    
+' Reemplazar Time 12:00 AM con 12:01 AM
+
+    Range("G2").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Selection.Replace What:="12:00:00 AM", Replacement:="12:01:00 AM", LookAt _
+        :=xlPart, SearchOrder:=xlByRows, MatchCase:=False, SearchFormat:=True, _
+        ReplaceFormat:=True
+    
+'Conditional Macro - Written Flags
+
+'0.0416666666666667 1 AM
+'0.4166666666666670 10 AM
+'0.2500000000000000 6 AM
+'Overnight - Clock in > Clock out AND Hours >1.5
+
+ Range("J2").Select
+    ActiveCell.FormulaR1C1 = _
+        "=IF(RC[-3]=0.000694444444444444,""Clock in time?"",IF(RC[-2]=0.999305555555556,""Clock out time?"",IF(AND(RC[-1]>0.001,RC[-1]<0.021),""Verify shift"", IF(RC[-1]>=14,""Long hours - Verify"",IF(AND(RC[-2]<RC[-3],RC[-1]>1.5,RC[-2]>0.0416666666666667),""Overnight?"","" "")))))"
+    Range("J2").Select
+    Selection.AutoFill Destination:=Range(Selection, Selection.End(xlDown))
+
+'Flags resaltadas
+
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveSheet.Range("$A:$J").AutoFilter Field:=1, Criteria1:="Main Location"
+    ActiveSheet.Range("$A:$J").AutoFilter Field:=1
+    'To show all non-blanks we use Criterial:="<>"
+    ActiveSheet.Range("$A:$J").AutoFilter Field:=10, Criteria1:="<>"
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Copy
+    
+    
+'Extra Tab Named "Flags"
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    ActiveSheet.Paste
+    Sheets("Sheet2").Select
+    Sheets("Sheet2").Name = "Flags"
+    Range("A1").Select
+    Range(Selection, Selection.CurrentRegion).Select
+    With Selection
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlBottom
+        .WrapText = False
+        .Orientation = 0
+        .AddIndent = False
+        .IndentLevel = 0
+        .ShrinkToFit = False
+        .ReadingOrder = xlContext
+        .MergeCells = False
+    End With
+    Worksheets("Flags").Columns("A:J").AutoFit
+    
+        
+'Range Sorted "Flags"
+    Range("A2").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.Worksheets("Flags").Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets("Flags").Sort.SortFields.Add2 Key:=Range(Range("A2"), Range("A2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Flags").Sort.SortFields.Add2 Key:=Range(Range("E2"), Range("E2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Flags").Sort.SortFields.Add2 Key:=Range(Range("D2"), Range("D2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Flags").Sort.SortFields.Add2 Key:=Range(Range("F2"), Range("F2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("Flags").Sort
+        .SetRange Range("A2").CurrentRegion
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+    
+'Page SetUp "Flags"
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+' Saving_Files Macro Flags
+    Sheets("Flags").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Flags" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+        
+'Going back to Sheet1
+    Sheets("Sheet1").Select
+    Range("A1").Select
+    Range("A1").Offset(rowoffset:=1, Columnoffset:=0).Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Copy
+    Selection.Style = "Neutral"
+    ActiveSheet.Range("$A:$J").AutoFilter Field:=10
+    Range("A1").Select
+
+'Stores 2-13
+
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:= _
+        "Main Location"
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:=Array( _
+        "103 BTW", "104 B37", "110 WTW", "111 ANW", "113 OOW", "202 DVW", "209 STG", "312 OPF"), Operator:=xlFilterValues
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Copy
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    ActiveSheet.Paste
+    Sheets("Sheet3").Select
+    Sheets("Sheet3").Name = "Stores 2-13"
+    Cells.Select
+    Cells.EntireColumn.AutoFit
+
+'Range Sorted Stores 2-13
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.Worksheets("Stores 2-13").Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets("Stores 2-13").Sort.SortFields.Add2 Key:=Range(Range("A2"), Range("A2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 2-13").Sort.SortFields.Add2 Key:=Range(Range("D2"), Range("D2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 2-13").Sort.SortFields.Add2 Key:=Range(Range("F2"), Range("F2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 2-13").Sort.SortFields.Add2 Key:=Range(Range("G2"), Range("G2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("Stores 2-13").Sort
+        .SetRange Range("A1").CurrentRegion
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+
+    
+'Page SetUp
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+' Saving_Files Macro Stores 2-13
+
+    Sheets("Stores 2-13").Select
+    ChDir "C:\Users\
+    
+    \Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Stores 2-13" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+ 
+    
+'Stores 14-22
+    Sheets("Sheet1").Select
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:= _
+        "Main Location"
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:=Array( _
+        "114 WFW", "115 WTF", "116 UNP", "117 HTW", "118 FVW", "119 SLW", "120 HPW", "121 OPW", "122 STW"), Operator:=xlFilterValues
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Copy
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    ActiveSheet.Paste
+    Sheets("Sheet4").Select
+    Sheets("Sheet4").Name = "Stores 14-22"
+    Cells.Select
+    Cells.EntireColumn.AutoFit
+
+'Range sorted Stores 14-22
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.Worksheets("Stores 14-22").Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets("Stores 14-22").Sort.SortFields.Add2 Key:=Range(Range("A2"), Range("A2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 14-22").Sort.SortFields.Add2 Key:=Range(Range("D2"), Range("D2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 14-22").Sort.SortFields.Add2 Key:=Range(Range("F2"), Range("F2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 14-22").Sort.SortFields.Add2 Key:=Range(Range("G2"), Range("G2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("Stores 14-22").Sort
+        .SetRange Range("A1").CurrentRegion
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+'Page SetUp
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+' Saving_Files Macro Stores 14-22
+
+    Sheets("Stores 14-22").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Stores 14-22" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+
+'Stores 23-37
+    Sheets("Sheet1").Select
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:= _
+        "Main Location"
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:=Array( _
+        "123 OKB", "124 RDG", "125 BRF", "126 BYS", "127 MYF", "128 HIP", "129 WCC", "130 AUR", "131 CSN", "132 GRW", "133 KEN", "134 GUR", "135 PER", "136 BEA", "137 TWE"), Operator:=xlFilterValues
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Copy
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    ActiveSheet.Paste
+    Sheets("Sheet5").Select
+    Sheets("Sheet5").Name = "Stores 23-37"
+    Cells.Select
+    Cells.EntireColumn.AutoFit
+
+'Range sorted Stores 23-37
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.Worksheets("Stores 23-37").Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets("Stores 23-37").Sort.SortFields.Add2 Key:=Range(Range("A2"), Range("A2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 23-37").Sort.SortFields.Add2 Key:=Range(Range("D2"), Range("D2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 23-37").Sort.SortFields.Add2 Key:=Range(Range("F2"), Range("F2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("Stores 23-37").Sort.SortFields.Add2 Key:=Range(Range("G2"), Range("G2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("Stores 23-37").Sort
+        .SetRange Range("A1").CurrentRegion
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+'Page SetUp
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+' Saving_Files Macro Stores 23-37
+    Sheets("Stores 23-37").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Stores 23-37" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+
+'Homan
+    Sheets("Sheet1").Select
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:= _
+        "Main Location"
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:=Array( _
+        "Homan"), Operator:=xlFilterValues
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Copy
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    ActiveSheet.Paste
+    Sheets("Sheet6").Select
+    Sheets("Sheet6").Name = "HOMAN"
+    Cells.Select
+    Cells.EntireColumn.AutoFit
+
+' Sort Macro
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.Worksheets("HOMAN").Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets("HOMAN").Sort.SortFields.Add2 Key:=Range(Range("E2"), Range("E2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("HOMAN").Sort.SortFields.Add2 Key:=Range(Range("D2"), Range("D2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("HOMAN").Sort.SortFields.Add2 Key:=Range(Range("F2"), Range("F2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("HOMAN").Sort.SortFields.Add2 Key:=Range(Range("G2"), Range("G2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("Homan").Sort
+        .SetRange Range("A1").CurrentRegion
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+'Page SetUp - Homan
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+    
+'Saving_Files Macro HOMAN
+    Sheets("HOMAN").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " HOMAN" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+    
+' PivotTable Macro - Undefined Range - Homan
+    Sheets("HOMAN").Select
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:= _
+        Sheets("Homan").Range("A1").CurrentRegion, Version:=6).CreatePivotTable TableDestination:= _
+        "Sheet7!R3C1", TableName:="PivotTable2", DefaultVersion:=6
+    Sheets("Sheet7").Select
+    Cells(3, 1).Select
+    With ActiveSheet.PivotTables("PivotTable2")
+        .ColumnGrand = True
+        .HasAutoFormat = True
+        .DisplayErrorString = False
+        .DisplayNullString = True
+        .EnableDrilldown = True
+        .ErrorString = ""
+        .MergeLabels = False
+        .NullString = ""
+        .PageFieldOrder = 2
+        .PageFieldWrapCount = 0
+        .PreserveFormatting = True
+        .RowGrand = True
+        .SaveData = True
+        .PrintTitles = False
+        .RepeatItemsOnEachPrintedPage = True
+        .TotalsAnnotation = False
+        .CompactRowIndent = 1
+        .InGridDropZones = False
+        .DisplayFieldCaptions = True
+        .DisplayMemberPropertyTooltips = False
+        .DisplayContextTooltips = True
+        .ShowDrillIndicators = True
+        .PrintDrillIndicators = False
+        .AllowMultipleFilters = False
+        .SortUsingCustomLists = True
+        .FieldListSortAscending = False
+        .ShowValuesRow = False
+        .CalculatedMembersInFilters = False
+        .RowAxisLayout xlCompactRow
+    End With
+    With ActiveSheet.PivotTables("PivotTable2").PivotCache
+        .RefreshOnFileOpen = False
+        .MissingItemsLimit = xlMissingItemsDefault
+    End With
+    ActiveSheet.PivotTables("PivotTable2").RepeatAllLabels xlRepeatLabels
+    With ActiveSheet.PivotTables("PivotTable2").PivotFields("Team")
+        .Orientation = xlRowField
+        .Position = 1
+    End With
+    ActiveSheet.PivotTables("PivotTable2").AddDataField ActiveSheet.PivotTables( _
+        "PivotTable2").PivotFields("Hours"), "Sum of Hours", xlSum
+    Sheets("Sheet7").Select
+    With ActiveSheet.PivotTables("PivotTable2").PivotFields("Name")
+        .Orientation = xlRowField
+        .Position = 2
+    End With
+    Sheets("Sheet7").Name = "Homan SUM"
+    Range("B5").Select
+    ActiveSheet.PivotTables("PivotTable2").PivotFields("Name").AutoSort xlAscending _
+        , "Sum of Hours", ActiveSheet.PivotTables("PivotTable2").PivotColumnAxis. _
+        PivotLines(1), 1
+        
+'Page SetUp - Homan Sum
+    
+    Range("A3").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+
+' Saving_Files Macro Pivot Table Homan SUM
+    Sheets("Homan SUM").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Homan SUM" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+    
+'Fairfield
+    Sheets("Sheet1").Select
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:= _
+        "Main Location"
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:=Array( _
+        "Fairfield"), Operator:=xlFilterValues
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Copy
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    ActiveSheet.Paste
+    Sheets("Sheet8").Select
+    Sheets("Sheet8").Name = "FAIRFIELD"
+    Cells.Select
+    Cells.EntireColumn.AutoFit
+
+' Sorted Range - Fairfield
+
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.Worksheets("FAIRFIELD").Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets("FAIRFIELD").Sort.SortFields.Add2 Key:=Range(Range("E2"), Range("E2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("FAIRFIELD").Sort.SortFields.Add2 Key:=Range(Range("D2"), Range("D2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("FAIRFIELD").Sort.SortFields.Add2 Key:=Range(Range("F2"), Range("F2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("FAIRFIELD").Sort.SortFields.Add2 Key:=Range(Range("G2"), Range("G2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("FAIRFIELD").Sort
+        .SetRange Range("A1").CurrentRegion
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+'Page SetUp - Fairfield
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+    
+' Saving_Files Macro FAIRFIELD
+
+    Sheets("FAIRFIELD").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " FAIRFIELD" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+    
+    
+' PivotTable Macro - Undefined Range - Fairfield
+    Sheets("FAIRFIELD").Select
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:= _
+        Sheets("FAIRFIELD").Range("A1").CurrentRegion, Version:=6).CreatePivotTable TableDestination:= _
+        "Sheet9!R3C1", TableName:="PivotTable2", DefaultVersion:=6
+    Sheets("Sheet9").Select
+    Cells(3, 1).Select
+    With ActiveSheet.PivotTables("PivotTable2")
+        .ColumnGrand = True
+        .HasAutoFormat = True
+        .DisplayErrorString = False
+        .DisplayNullString = True
+        .EnableDrilldown = True
+        .ErrorString = ""
+        .MergeLabels = False
+        .NullString = ""
+        .PageFieldOrder = 2
+        .PageFieldWrapCount = 0
+        .PreserveFormatting = True
+        .RowGrand = True
+        .SaveData = True
+        .PrintTitles = False
+        .RepeatItemsOnEachPrintedPage = True
+        .TotalsAnnotation = False
+        .CompactRowIndent = 1
+        .InGridDropZones = False
+        .DisplayFieldCaptions = True
+        .DisplayMemberPropertyTooltips = False
+        .DisplayContextTooltips = True
+        .ShowDrillIndicators = True
+        .PrintDrillIndicators = False
+        .AllowMultipleFilters = False
+        .SortUsingCustomLists = True
+        .FieldListSortAscending = False
+        .ShowValuesRow = False
+        .CalculatedMembersInFilters = False
+        .RowAxisLayout xlCompactRow
+    End With
+    With ActiveSheet.PivotTables("PivotTable2").PivotCache
+        .RefreshOnFileOpen = False
+        .MissingItemsLimit = xlMissingItemsDefault
+    End With
+    ActiveSheet.PivotTables("PivotTable2").RepeatAllLabels xlRepeatLabels
+    With ActiveSheet.PivotTables("PivotTable2").PivotFields("Team")
+        .Orientation = xlRowField
+        .Position = 1
+    End With
+    ActiveSheet.PivotTables("PivotTable2").AddDataField ActiveSheet.PivotTables( _
+        "PivotTable2").PivotFields("Hours"), "Sum of Hours", xlSum
+    Sheets("Sheet9").Select
+    With ActiveSheet.PivotTables("PivotTable2").PivotFields("Name")
+        .Orientation = xlRowField
+        .Position = 2
+    End With
+    Sheets("Sheet9").Name = "Fairfield SUM"
+    Range("A5").Select
+    ActiveSheet.PivotTables("PivotTable2").PivotFields("Name").AutoSort xlAscending _
+        , "Name"
+        
+'Page SetUp - Fairfield Sum
+    Range("A3").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+' Saving_Files Macro Pivot Table Fairfield SUM
+    Sheets("Fairfield SUM").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Fairfield SUM" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+
+'Hubbard
+    Sheets("Sheet1").Select
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:= _
+        "Main Location"
+    ActiveSheet.Range(Selection, Cells(Selection.End(xlDown).Row, Selection.End(xlToRight).Column)).AutoFilter Field:=1, Criteria1:=Array( _
+        "Hubbard"), Operator:=xlFilterValues
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Selection.Copy
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    ActiveSheet.Paste
+    Sheets("Sheet10").Select
+    Sheets("Sheet10").Name = "HUBBARD"
+    Cells.Select
+    Cells.EntireColumn.AutoFit
+
+' Sorted Range - Hubbard
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.Worksheets("HUBBARD").Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets("HUBBARD").Sort.SortFields.Add2 Key:=Range(Range("E2"), Range("E2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("HUBBARD").Sort.SortFields.Add2 Key:=Range(Range("D2"), Range("D2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("HUBBARD").Sort.SortFields.Add2 Key:=Range(Range("F2"), Range("F2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets("HUBBARD").Sort.SortFields.Add2 Key:=Range(Range("G2"), Range("G2").End(xlDown) _
+        ), SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("HUBBARD").Sort
+        .SetRange Range("A1").CurrentRegion
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+'Page SetUp - Hubbard
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+    
+' Saving_Files Macro HUBBARD
+
+    Sheets("HUBBARD").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " HUBBARD" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+    
+' PivotTable Macro - Undefined Range - Hubbard
+
+    Sheets("HUBBARD").Select
+    Sheets.Add after:=ActiveSheet
+    Range("A1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    ActiveWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:= _
+        Sheets("HUBBARD").Range("A1").CurrentRegion, Version:=6).CreatePivotTable TableDestination:= _
+        "Sheet11!R3C1", TableName:="PivotTable2", DefaultVersion:=6
+    Sheets("Sheet11").Select
+    Cells(3, 1).Select
+    With ActiveSheet.PivotTables("PivotTable2")
+        .ColumnGrand = True
+        .HasAutoFormat = True
+        .DisplayErrorString = False
+        .DisplayNullString = True
+        .EnableDrilldown = True
+        .ErrorString = ""
+        .MergeLabels = False
+        .NullString = ""
+        .PageFieldOrder = 2
+        .PageFieldWrapCount = 0
+        .PreserveFormatting = True
+        .RowGrand = True
+        .SaveData = True
+        .PrintTitles = False
+        .RepeatItemsOnEachPrintedPage = True
+        .TotalsAnnotation = False
+        .CompactRowIndent = 1
+        .InGridDropZones = False
+        .DisplayFieldCaptions = True
+        .DisplayMemberPropertyTooltips = False
+        .DisplayContextTooltips = True
+        .ShowDrillIndicators = True
+        .PrintDrillIndicators = False
+        .AllowMultipleFilters = False
+        .SortUsingCustomLists = True
+        .FieldListSortAscending = False
+        .ShowValuesRow = False
+        .CalculatedMembersInFilters = False
+        .RowAxisLayout xlCompactRow
+    End With
+    With ActiveSheet.PivotTables("PivotTable2").PivotCache
+        .RefreshOnFileOpen = False
+        .MissingItemsLimit = xlMissingItemsDefault
+    End With
+    ActiveSheet.PivotTables("PivotTable2").RepeatAllLabels xlRepeatLabels
+    With ActiveSheet.PivotTables("PivotTable2").PivotFields("Team")
+        .Orientation = xlRowField
+        .Position = 1
+    End With
+    ActiveSheet.PivotTables("PivotTable2").AddDataField ActiveSheet.PivotTables( _
+        "PivotTable2").PivotFields("Hours"), "Sum of Hours", xlSum
+    Sheets("Sheet11").Select
+    With ActiveSheet.PivotTables("PivotTable2").PivotFields("Name")
+        .Orientation = xlRowField
+        .Position = 2
+    End With
+    Sheets("Sheet11").Name = "Hubbard SUM"
+    Range("A5").Select
+    ActiveSheet.PivotTables("PivotTable2").PivotFields("Name").AutoSort xlAscending _
+        , "Name"
+        
+'Page SetUp - Hubbard Sum
+    
+    Range("A3").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Range(Selection, Selection.End(xlToRight)).Select
+    Application.CutCopyMode = False
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+    End With
+    Application.PrintCommunication = True
+    ActiveSheet.PageSetup.PrintArea = _
+    ActiveCell.CurrentRegion.Address
+    Application.PrintCommunication = False
+    With ActiveSheet.PageSetup
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlPortrait
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 0
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+        .EvenPage.LeftHeader.Text = ""
+        .EvenPage.CenterHeader.Text = ""
+        .EvenPage.RightHeader.Text = ""
+        .EvenPage.LeftFooter.Text = ""
+        .EvenPage.CenterFooter.Text = ""
+        .EvenPage.RightFooter.Text = ""
+        .FirstPage.LeftHeader.Text = ""
+        .FirstPage.CenterHeader.Text = ""
+        .FirstPage.RightHeader.Text = ""
+        .FirstPage.LeftFooter.Text = ""
+        .FirstPage.CenterFooter.Text = ""
+        .FirstPage.RightFooter.Text = ""
+    End With
+    Application.PrintCommunication = True
+    
+' Saving_Files Macro Pivot Table Hubbard SUM
+
+    Sheets("Hubbard SUM").Select
+    ChDir "C:\Users\username\Desktop\Alexandra\TANDA REPORTS"
+    ActiveSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:= _
+        ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Hubbard SUM" & ".pdf") _
+        , Quality:=xlQualityStandard, IncludeDocProperties:=True, IgnorePrintAreas _
+        :=False, OpenAfterPublish:=True
+        
+        
+'Sending Gmails from VBA (For ppe 2 days ago) - Read & Respond Reports PPE ***HUBBARD & FAIRFIELD & HOMAN & STORES & SG
+
+
+'creating a CDO object
+'REMEMBER TO ACTIVATE REFERENCES. TOOLS -> REFERENCES -> Microsoft CDO for Windows 2000 Library CHECK ---> IMPORTANTE
+   
+'CDO is an application programming interface, it allows developers to  access Global Address List and mailboxes.
+   Dim Mail As CDO.Message
+   Set Mail = New CDO.Message
+
+'Enable SSL Authentication
+'Secure Sockets Layer, creates a secure coneection for user-server interactions. It verifies that the user is a real person.
+   Mail.Configuration.Fields.Item _
+   ("http://schemas.microsoft.com/cdo/configuration/smtpusessl") = True
+
+'Make SMTP authentication Enabled=true (1)
+   Mail.Configuration.Fields.Item _
+   ("http://schemas.microsoft.com/cdo/configuration/smtpauthenticate") = 1
+
+'Set the SMTP server and port Details
+'Get these details from the Settings Page of your Gmail Account
+'Server Address
+    Mail.Configuration.Fields.Item _
+   ("http://schemas.microsoft.com/cdo/configuration/smtpserver") = _
+    "smtp.gmail.com"
+'Ports are a gateway to connect to an external device for communication
+'Port 25 might be blocked (considered as spam). Port 587 is the recommended one for message submissions by mail clients to mail serves.
+' https://pepipost.com/blog/smtp-port-25/
+    Mail.Configuration.Fields.Item _
+   ("http://schemas.microsoft.com/cdo/configuration/smtpserverport") = 25
+   Mail.Configuration.Fields.Item _
+   ("http://schemas.microsoft.com/cdo/configuration/sendusing") = 2
+
+'Set your credentials of your Gmail Account
+   Mail.Configuration.Fields.Item _
+   ("http://schemas.microsoft.com/cdo/configuration/sendusername") = _
+   "email_here@gmail.com"
+   Mail.Configuration.Fields.Item _
+   ("http://schemas.microsoft.com/cdo/configuration/sendpassword") = _
+   "Password_here"
+
+'Update the configuration fields
+   Mail.Configuration.Fields.Update
+
+'Set All Email Properties
+   With Mail
+      .Subject = "*READ & RESPOND* Payroll Reports ~ HUBBARD PPE " & Format(Now() - 2, "MM.DD.YY")
+      .From = "email_here@gmail.com"
+      '.To = "email_here@gmail.com"
+      .To = "email_here2@gmail.com;email_here3@gmail.com;email_here4@gmail.com"
+      .CC = "email_here@gmail.com"
+      '.BCC = "email_here@gmail.com"
+    'To hightlight just a sentence is <SPAN>. ---> NOTA
+    .HTMLBody = "<p>" & "<font size=3>" & "Hi all!" & _
+    "<br>" & _
+    "<br>" & _
+    "Attached are the payroll hours for" & _
+    "<b>" & " HUBBARD " & "</b>" & _
+    "for the pay period of " & _
+    "<B style = color:red>" & Format(Now() - 15, "MM.DD.YY") & " to " & Format(Now() - 2, "MM.DD.YY") & "." & "</B>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=5>" & "<b style = background-color:lime>" & "Please feel free to make all the corrections needed on Tanda! " & "</B>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=3>" & "<span style = background-color:yellow>" & "<b>" & "The corrections needed are highlighted in yellow." & "</b>" & "</span>" & _
+    "<br>" & _
+    "<br>" & _
+    "Thanks!!" & _
+    "</p>"
+    
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " HUBBARD" & ".pdf") 'To attach Documents in mail
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Hubbard SUM" & ".pdf")
+    
+
+   End With
+'to send the mail
+   Mail.Send
+   
+   
+'Set All Email Properties - FAIRFIELD
+   With Mail
+   
+      .Subject = "*READ & RESPOND* Payroll Reports ~ FAIRFIELD PPE " & Format(Now() - 2, "MM.DD.YY")
+      .From = "email_here@gmail.com"
+      '.To = "email_here@gmail.com"
+      .To = "email_here2@gmail.com;email_here3@gmail.com;email_here4@gmail.com"
+      .CC = "email_here@gmail.com"
+      '.BCC = "email_here@gmail.com"
+      .HTMLBody = "<p>" & "<font size=3>" & "Hi all!" & _
+    "<br>" & _
+    "<br>" & _
+    "Attached are the payroll hours for" & _
+    "<b>" & " FAIRFIELD " & "</b>" & _
+    "for the pay period of " & _
+    "<B style = color:red>" & Format(Now() - 15, "MM.DD.YY") & " to " & Format(Now() - 2, "MM.DD.YY") & "." & "</B>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=5>" & "<b style = background-color:lime>" & "Please feel free to make all the corrections needed on Tanda! " & "</B>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=3>" & "<span style = background-color:yellow>" & "<b>" & "The corrections needed are highlighted in yellow." & "</b>" & "</span>" & _
+    "<br>" & _
+    "<br>" & _
+    "Thanks!!" & _
+    "</p>"
+    
+    .Attachments.DeleteAll
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " FAIRFIELD" & ".pdf") 'To attach Documents in mail
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Fairfield SUM" & ".pdf")
+   
+   End With
+'to send the mail
+   Mail.Send
+   
+'Set All Email Properties - HOMAN
+   With Mail
+   
+      .Subject = "*READ & RESPOND* Payroll Reports ~ HOMAN PPE " & Format(Now() - 2, "MM.DD.YY")
+      .From = "email_here@gmail.com"
+      '.To = "email_here@gmail.com"
+      .To = "email_here2@gmail.com;email_here3@gmail.com;email_here4@gmail.com"
+      .CC = "email_here@gmail.com"
+      '.BCC = "email_here@gmail.com"
+    .HTMLBody = "<p>" & "<font size=3>" & "Hi all!" & _
+    "<br>" & _
+    "<br>" & _
+    "Attached are the payroll hours for" & _
+    "<b>" & " HOMAN " & "</b>" & _
+    "for the pay period of " & _
+    "<B style = color:red>" & Format(Now() - 15, "MM.DD.YY") & " to " & Format(Now() - 2, "MM.DD.YY") & "." & "</B>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=5>" & "<b style = background-color:lime>" & "Please feel free to make all the corrections needed on Tanda! " & "</B>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=3>" & "<span style = background-color:yellow>" & "<b>" & "The corrections needed are highlighted in yellow." & "</b>" & "</span>" & _
+    "<br>" & _
+    "<br>" & _
+    "Thanks!!" & _
+    "</p>"
+    
+    .Attachments.DeleteAll
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " HOMAN" & ".pdf") 'To attach Documents in mail
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Homan SUM" & ".pdf")
+   
+   End With
+'to send the mail
+   Mail.Send
+
+'Set All Email Properties - STORES
+   With Mail
+   
+      .Subject = "*READ & RESPOND!! ** PLEASE CONFIRM YOUR STORE'S HOURS ** PPE " & Format(Now() - 2, "MM.DD.YY")
+      .From = "email_here@gmail.com"
+      '.To = "email_here@gmail.com"
+      .To = "email_here2@gmail.com;email_here3@gmail.com;email_here4@gmail.com"
+      .CC = "email_here@gmail.com"
+      '.BCC = "email_here@gmail.com"
+    .HTMLBody = "<p>" & "<font size=4>" & "Hello Store Managers!" & _
+    "<br>" & _
+    "<br>" & _
+    "Attached are the payroll hours for" & _
+    "the pay period of " & _
+    "<B style = color:red>" & Format(Now() - 15, "MM.DD.YY") & " to " & Format(Now() - 2, "MM.DD.YY") & "." & "</B>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=5>" & "<b style>" & "You can check/edit/add/delete timecards to TANDA, ALL corrections must be ready today! " & "</B>" & _
+    "<br>" & _
+    "<font size=3>" & "<b style>" & "These reports already have the strikes you need to fix, you'll find it highlighted in yellow: " & "</B>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=3>" & "<span style = background-color:yellow>" & "<b>" & "Please make your corrections TODAY!" & "</b>" & "</span>" & _
+    "<br>" & _
+    "<br>" & _
+    "<font size=2>" & "https://docs.google.com/spreadsheets/d/1_A6ipFD0tM_GGo9aGlqhW0K_UVTfe78t9pcPuuGqfyM/edit?usp=sharing" & _
+    "<br>" & _
+    "<font size=3>" & "Thanks!!" & _
+    "<br>" & _
+    "Alexandra." & _
+    "</p>"
+    
+    .Attachments.DeleteAll
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Stores 2-13" & ".pdf") 'To attach Documents in mail
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Stores 14-22" & ".pdf")
+    .AddAttachment ("C:\Users\username\Desktop\Alexandra\TANDA REPORTS\Hours ppe " & Format(Now() - 2, "MM.DD.YY") & " Stores 23-37" & ".pdf")
+   
+   End With
+'to send the mail
+   Mail.Send
+
+   
+'Determine how many seconds code took to run
+  SecondsElapsed = Round(Timer - StartTime, 2) / 60
+
+MsgBox ("Mondays Report Ran and Sent in " & SecondsElapsed & " minutes!")
+
+
+End Sub
